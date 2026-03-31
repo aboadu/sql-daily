@@ -335,7 +335,127 @@ function analyzeSQL(code) {
   return { issues, info };
 }
 
-// ---- Run (shows formatted query + analysis, no grading) ----
+// ---- Generate simulated result table from a query ----
+function generateFakeResults(code) {
+  const lower = code.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // Extract column names/aliases from the SELECT clause
+  const selMatch = lower.match(/select\s+(.*?)\s+from/s);
+  if (!selMatch) return null;
+
+  let selectPart = selMatch[1].trim();
+  // Remove DISTINCT / DISTINCT ON
+  selectPart = selectPart.replace(/^distinct\s+(on\s*\(.*?\)\s*)?/i, '');
+
+  // Parse columns — handle nested parens (aggregates, window funcs)
+  const columns = [];
+  let depth = 0, current = '';
+  for (const ch of selectPart) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) {
+      columns.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) columns.push(current.trim());
+
+  // Extract display names (use alias if present, otherwise derive)
+  const colNames = columns.map(col => {
+    const aliasMatch = col.match(/\bas\s+["']?(\w+)["']?\s*$/i);
+    if (aliasMatch) return aliasMatch[1];
+    // If it's just a column reference like t.name, take the last part
+    const dotMatch = col.match(/\.(\w+)\s*$/);
+    if (dotMatch) return dotMatch[1];
+    // If it's a simple column name
+    const simpleMatch = col.match(/^(\w+)$/);
+    if (simpleMatch) return simpleMatch[1];
+    // For expressions like COUNT(*), derive a name
+    const funcMatch = col.match(/^(\w+)\s*\(/);
+    if (funcMatch) return funcMatch[1].toLowerCase();
+    return 'column';
+  });
+
+  // Generate fake data based on column names
+  const sampleNames = ['Alice Johnson', 'Marcus Lee', 'Sara Kim', 'James Park', 'Olivia Chen', 'Ryan Kumar', 'Diana Ross', 'Tom Bradley'];
+  const sampleEmails = ['alice@gmail.com', 'marcus@yahoo.com', 'sara@outlook.com', 'james@gmail.com'];
+  const sampleDepts = ['Engineering', 'Marketing', 'Sales', 'Product', 'Finance'];
+  const sampleCities = ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix'];
+  const sampleProducts = ['Widget A', 'Gadget B', 'Tool C', 'Device D', 'Module E'];
+  const sampleStatuses = ['active', 'inactive', 'pending'];
+  const sampleMonths = ['2024-01-01', '2024-02-01', '2024-03-01', '2024-04-01', '2024-05-01'];
+
+  function fakeValue(name, rowIdx) {
+    const n = name.toLowerCase();
+    if (n.includes('id') && !n.includes('email'))
+      return rowIdx + 1 + Math.floor(Math.random() * 10) * (rowIdx + 1);
+    if (n === 'name' || n === 'employee' || n === 'full_name' || n === 'customer_name' || n === 'employee_name' || n === 'username' || n === 'display_name')
+      return sampleNames[rowIdx % sampleNames.length];
+    if (n.includes('email'))
+      return sampleEmails[rowIdx % sampleEmails.length];
+    if (n.includes('dept') || n === 'department')
+      return sampleDepts[rowIdx % sampleDepts.length];
+    if (n.includes('city') || n.includes('country') || n.includes('region'))
+      return sampleCities[rowIdx % sampleCities.length];
+    if (n.includes('product') && !n.includes('id'))
+      return sampleProducts[rowIdx % sampleProducts.length];
+    if (n.includes('status'))
+      return sampleStatuses[rowIdx % sampleStatuses.length];
+    if (n.includes('month') || n.includes('date') || n.includes('day'))
+      return sampleMonths[rowIdx % sampleMonths.length];
+    if (n.includes('salary') || n.includes('compensation'))
+      return (80000 + Math.floor(Math.random() * 70000));
+    if (n.includes('revenue') || n.includes('total') || n.includes('amount') || n.includes('price') || n.includes('fare') || n.includes('spent'))
+      return parseFloat((100 + Math.random() * 9900).toFixed(2));
+    if (n.includes('avg') || n.includes('median') || n.includes('percent') || n.includes('rate') || n.includes('ratio'))
+      return parseFloat((Math.random() * 100).toFixed(2));
+    if (n.includes('count') || n.includes('num') || n.includes('streak') || n === 'mau' || n === 'viewers' || n === 'purchasers' || n === 'retained')
+      return Math.floor(10 + Math.random() * 990);
+    if (n.includes('rank') || n === 'rnk' || n === 'rn' || n === 'row_num' || n === 'ntile')
+      return rowIdx + 1;
+    if (n.includes('sum') || n.includes('running'))
+      return parseFloat((1000 + Math.random() * 50000).toFixed(2));
+    if (n.includes('bracket') || n.includes('tier') || n.includes('label') || n.includes('type') || n.includes('category'))
+      return ['High', 'Medium', 'Low'][rowIdx % 3];
+    if (n.includes('length'))
+      return Math.floor(5 + Math.random() * 20);
+    if (n.includes('domain'))
+      return ['gmail.com', 'yahoo.com', 'outlook.com', 'company.com'][rowIdx % 4];
+    if (n.includes('contact'))
+      return ['555-0101', 'alice@email.com', 'No contact info', '555-0202'][rowIdx % 4];
+    // Default: a number
+    return Math.floor(1 + Math.random() * 100);
+  }
+
+  // Determine row count — use LIMIT if present, otherwise 5
+  let rowCount = 5;
+  const limitMatch = lower.match(/limit\s+(\d+)/);
+  if (limitMatch) rowCount = Math.min(parseInt(limitMatch[1], 10), 10);
+
+  // Check for single-row aggregates (no GROUP BY, has aggregate func)
+  const hasGroupBy = lower.includes('group by');
+  const hasAgg = /\b(count|sum|avg|max|min)\s*\(/.test(lower);
+  if (hasAgg && !hasGroupBy) rowCount = 1;
+
+  const rows = [];
+  for (let i = 0; i < rowCount; i++) {
+    rows.push(colNames.map(col => fakeValue(col, i)));
+  }
+
+  return { columns: colNames, rows };
+}
+
+function renderResultTable(columns, rows) {
+  const ths = columns.map(c => `<th>${c}</th>`).join('');
+  const trs = rows.map(r =>
+    `<tr>${r.map(cell => `<td>${cell !== null && cell !== undefined ? cell : '<span style="color:#888">NULL</span>'}</td>`).join('')}</tr>`
+  ).join('');
+  return `<table class="output-result-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+}
+
+// ---- Run (shows simulated output, no grading) ----
 function runQuery() {
   const code = getCode().trim();
   if (!code) {
@@ -350,6 +470,7 @@ function runQuery() {
 
   setTimeout(() => {
     const { issues, info } = analyzeSQL(code);
+    const results = generateFakeResults(code);
 
     const issueHtml = issues.length
       ? `<div class="run-issues">
@@ -357,6 +478,16 @@ function runQuery() {
            ${issues.map(i => `<div class="run-issue-item">${i}</div>`).join('')}
          </div>`
       : '';
+
+    const resultHtml = results
+      ? `<div style="margin-bottom: 12px;">
+           <div class="run-section-label" style="color: var(--green);">Output — ${results.rows.length} row${results.rows.length !== 1 ? 's' : ''}</div>
+           ${renderResultTable(results.columns, results.rows)}
+         </div>`
+      : `<div class="run-issues">
+           <div class="run-section-label" style="color: var(--red);">Could not parse query</div>
+           <div class="run-issue-item">Make sure your query has a valid SELECT ... FROM structure.</div>
+         </div>`;
 
     const infoHtml = info.length
       ? `<div class="run-info">
@@ -367,14 +498,11 @@ function runQuery() {
 
     body.innerHTML = `
       <div class="run-output-wrap">
-        <div class="run-query-block">
-          <div class="run-section-label" style="color: var(--green);">Your Query</div>
-          <pre class="run-query-pre">${escapeHtml(code)}</pre>
-        </div>
-        ${infoHtml}
+        ${resultHtml}
         ${issueHtml}
+        ${infoHtml}
         <div style="color: var(--text-muted); font-family: var(--font); font-size: 0.82rem; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
-          When you're ready, click <strong>Submit</strong> to check your answer.
+          <em>Simulated output with sample data.</em> Click <strong>Submit</strong> to check your answer.
         </div>
       </div>
     `;
