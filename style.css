@@ -15,6 +15,7 @@
   --green:      #00b8a3;
   --yellow:     #ffb800;
   --red:        #ef4743;
+  --beginner:   #43b0f1;
   --easy:       #00b8a3;
   --medium:     #ffb800;
   --hard:       #ef4743;
@@ -262,9 +263,10 @@ a { color: inherit; text-decoration: none; }
   font-weight: 600;
 }
 
-.badge-easy   { color: var(--easy);   background: rgba(0,184,163,0.1);  }
-.badge-medium { color: var(--medium); background: rgba(255,184,0,0.1);  }
-.badge-hard   { color: var(--hard);   background: rgba(239,71,67,0.1);  }
+.badge-beginner { color: var(--beginner); background: rgba(67,176,241,0.1); }
+.badge-easy     { color: var(--easy);     background: rgba(0,184,163,0.1);  }
+.badge-medium   { color: var(--medium);   background: rgba(255,184,0,0.1);  }
+.badge-hard     { color: var(--hard);     background: rgba(239,71,67,0.1);  }
 
 .tag {
   display: inline-flex;
