@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQLDaily — Practice SQL Every Day</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-left">
+      <span class="logo">SQL<span class="logo-accent">Daily</span></span>
+    </div>
+    <div class="nav-right">
+      <span class="streak-badge" id="streakBadge">🔥 <span id="streakCount">0</span> day streak</span>
+      <span class="progress-text" id="progressText">0 / 0 solved</span>
+    </div>
+  </nav>
+
+  <!-- HERO / DAILY CHALLENGE -->
+  <div class="hero" id="dailyHero">
+    <div class="hero-label">Daily Challenge</div>
+    <div class="hero-date" id="heroDate"></div>
+    <h2 class="hero-title" id="heroTitle">Loading...</h2>
+    <div class="hero-meta" id="heroMeta"></div>
+    <button class="btn-primary" id="heroBtn">Solve Today's Challenge →</button>
+  </div>
+
+  <!-- FILTERS + SEARCH -->
+  <div class="list-container">
+    <div class="list-header">
+      <div class="search-wrap">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search problems..." />
+      </div>
+      <div class="filter-wrap">
+        <select id="diffFilter" class="filter-select">
+          <option value="">All Difficulties</option>
+          <option value="Easy">Easy</option>
+          <option value="Medium">Medium</option>
+          <option value="Hard">Hard</option>
+        </select>
+        <select id="catFilter" class="filter-select">
+          <option value="">All Categories</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- PROBLEM TABLE -->
+    <table class="problem-table">
+      <thead>
+        <tr>
+          <th class="col-status"></th>
+          <th class="col-title">Title</th>
+          <th class="col-diff">Difficulty</th>
+          <th class="col-cat">Category</th>
+          <th class="col-accept">Acceptance</th>
+          <th class="col-companies">Companies</th>
+        </tr>
+      </thead>
+      <tbody id="problemList"></tbody>
+    </table>
+  </div>
+
+  <script src="problems.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

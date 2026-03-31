@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQLDaily — Problem</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- CodeMirror for SQL syntax highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" />
+</head>
+<body class="problem-page">
+
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-left">
+      <a href="index.html" class="back-link">← Problems</a>
+      <span class="logo">SQL<span class="logo-accent">Daily</span></span>
+    </div>
+    <div class="nav-right">
+      <button class="btn-outline" id="hintBtn">💡 Hint</button>
+      <button class="btn-outline" id="solutionBtn">👁 Solution</button>
+      <span class="streak-badge" id="streakBadge">🔥 <span id="streakCount">0</span> day streak</span>
+    </div>
+  </nav>
+
+  <!-- SPLIT VIEW -->
+  <div class="split-view">
+
+    <!-- LEFT: DESCRIPTION -->
+    <div class="panel panel-left" id="descPanel">
+      <div class="panel-tabs">
+        <button class="tab-btn active" data-tab="description">Description</button>
+        <button class="tab-btn" data-tab="submissions">Submissions</button>
+      </div>
+
+      <div class="tab-content" id="tab-description">
+        <div class="problem-header">
+          <span class="problem-number" id="probNum">#1</span>
+          <h2 class="problem-title" id="probTitle">Loading...</h2>
+          <div class="problem-badges" id="probBadges"></div>
+        </div>
+        <div class="problem-description" id="probDesc"></div>
+
+        <!-- HINT (hidden by default) -->
+        <div class="hint-box" id="hintBox" style="display:none">
+          <div class="hint-label">💡 Hint</div>
+          <p id="hintText"></p>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-submissions" style="display:none">
+        <div class="submissions-empty" id="subEmpty">
+          <div class="empty-icon">📋</div>
+          <p>No submissions yet.</p>
+          <p class="empty-sub">Run your query to see results here.</p>
+        </div>
+        <div id="subList"></div>
+      </div>
+    </div>
+
+    <!-- DIVIDER -->
+    <div class="divider" id="divider"></div>
+
+    <!-- RIGHT: EDITOR + OUTPUT -->
+    <div class="panel panel-right">
+      <div class="editor-toolbar">
+        <div class="lang-badge">PostgreSQL</div>
+        <div class="toolbar-actions">
+          <button class="icon-btn" id="resetBtn" title="Reset to starter">↺ Reset</button>
+          <button class="icon-btn" id="copyBtn" title="Copy code">⎘ Copy</button>
+        </div>
+      </div>
+
+      <div class="editor-wrap">
+        <textarea id="sqlEditor"></textarea>
+      </div>
+
+      <!-- OUTPUT PANEL -->
+      <div class="output-panel">
+        <div class="output-header">
+          <div class="output-tabs">
+            <button class="out-tab active" data-out="result">Result</button>
+            <button class="out-tab" data-out="expected">Expected</button>
+          </div>
+          <div class="run-actions">
+            <button class="btn-run" id="runBtn">▶ Run</button>
+            <button class="btn-submit" id="submitBtn">Submit</button>
+          </div>
+        </div>
+        <div class="output-body" id="outputBody">
+          <div class="output-placeholder">
+            <span>Run your query to see results</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SOLUTION MODAL -->
+  <div class="modal-overlay" id="solutionModal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Solution</h3>
+        <button class="modal-close" id="modalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <pre id="solutionCode"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUCCESS TOAST -->
+  <div class="toast toast-success" id="successToast" style="display:none">
+    ✅ Correct! Great work!
+  </div>
+  <div class="toast toast-error" id="errorToast" style="display:none">
+    ❌ Not quite. Check your query and try again.
+  </div>
+
+  <script src="problems.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+  <script src="problem.js"></script>
+</body>
+</html>
