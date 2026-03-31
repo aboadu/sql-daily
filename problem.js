@@ -141,128 +141,218 @@ function renderSubs() {
 }
 
 // ---- Check if query is correct ----
-// Multi-layered comparison for better accuracy without a real DB
+// Strict structural comparison — all required parts must match
 function checkCorrectness(code) {
   const normalize = s => s.toLowerCase()
-    .replace(/--.*$/gm, '')       // remove single-line comments
+    .replace(/--.*$/gm, '')           // remove single-line comments
     .replace(/\/\*[\s\S]*?\*\//g, '') // remove block comments
     .replace(/\s+/g, ' ')
-    .replace(/;$/, '')
+    .replace(/;\s*$/, '')
     .trim();
 
   const user = normalize(code);
   const sol  = normalize(problem.solution);
 
-  // Exact match (ignoring whitespace/comments/semicolons)
+  // Exact match
   if (user === sol) return true;
 
-  // Extract key SQL components from the solution
-  const extractClauses = (q) => {
-    const parts = {};
-    // Extract SELECT columns
-    const selMatch = q.match(/select\s+(.*?)\s+from/s);
-    if (selMatch) parts.select = selMatch[1].trim();
-    // Extract table names
-    const fromMatch = q.match(/from\s+(\w+)/);
-    if (fromMatch) parts.mainTable = fromMatch[1];
-    // Extract JOINs
-    parts.joins = (q.match(/join\s+\w+/g) || []);
-    // Extract WHERE conditions
-    const whereMatch = q.match(/where\s+(.*?)(?:\s+group\s+by|\s+order\s+by|\s+having|\s+limit|$)/s);
-    if (whereMatch) parts.where = whereMatch[1].trim();
-    // Extract GROUP BY
-    const groupMatch = q.match(/group\s+by\s+(.*?)(?:\s+having|\s+order\s+by|\s+limit|$)/s);
-    if (groupMatch) parts.groupBy = groupMatch[1].trim();
-    // Extract HAVING
-    const havingMatch = q.match(/having\s+(.*?)(?:\s+order\s+by|\s+limit|$)/s);
-    if (havingMatch) parts.having = havingMatch[1].trim();
-    // Check for key functions/keywords
-    parts.keywords = [];
-    const kwList = ['count', 'sum', 'avg', 'max', 'min', 'rank()', 'dense_rank()', 'row_number()',
-                    'ntile', 'lead', 'lag', 'first_value', 'last_value', 'coalesce', 'case',
-                    'partition by', 'over', 'with', 'union', 'union all', 'except', 'intersect',
-                    'exists', 'not exists', 'not in', 'in', 'between', 'like', 'ilike',
-                    'left join', 'right join', 'cross join', 'full join', 'inner join',
-                    'distinct', 'having', 'group by', 'order by', 'limit', 'offset',
-                    'date_trunc', 'extract', 'interval', 'percentile_cont', 'string_agg',
-                    'array_agg', 'filter', 'recursive', 'lateral', 'generate_series',
-                    'is null', 'is not null', 'desc', 'asc'];
-    kwList.forEach(kw => { if (sol.includes(kw)) parts.keywords.push(kw); });
-    return parts;
-  };
+  // ---- Extract structural components ----
+  function extractStructure(q) {
+    const s = {};
 
-  const solParts  = extractClauses(sol);
-  const userParts = extractClauses(user);
+    // All table names (from + joins)
+    s.tables = new Set();
+    const tableMatches = q.match(/(?:from|join)\s+(\w+)/g) || [];
+    tableMatches.forEach(m => {
+      const t = m.replace(/(?:from|join)\s+/i, '').trim();
+      if (!['select','where','on','and','or','as','in','not'].includes(t)) s.tables.add(t);
+    });
 
-  let score = 0;
-  let total = 0;
+    // Output column aliases
+    s.aliases = new Set();
+    const aliasMatches = q.match(/\bas\s+(\w+)/g) || [];
+    aliasMatches.forEach(m => s.aliases.add(m.replace(/^as\s+/, '')));
 
-  // Check main table
-  if (solParts.mainTable) {
-    total += 2;
-    if (userParts.mainTable === solParts.mainTable) score += 2;
-  }
+    // Key clauses present
+    s.hasWhere    = /\bwhere\b/.test(q);
+    s.hasGroupBy  = /\bgroup\s+by\b/.test(q);
+    s.hasHaving   = /\bhaving\b/.test(q);
+    s.hasOrderBy  = /\border\s+by\b/.test(q);
+    s.hasLimit    = /\blimit\b/.test(q);
+    s.hasDistinct = /\bdistinct\b/.test(q);
+    s.hasCTE      = /\bwith\b/.test(q);
+    s.hasUnion    = /\bunion\b/.test(q);
 
-  // Check JOIN tables present
-  if (solParts.joins.length > 0) {
-    total += 2;
-    const matchedJoins = solParts.joins.filter(j => user.includes(j));
-    score += (matchedJoins.length / solParts.joins.length) * 2;
-  }
+    // Join types
+    s.joinTypes = new Set();
+    const joinTypeMatches = q.match(/\b(left|right|full|cross|inner)?\s*join\b/g) || [];
+    joinTypeMatches.forEach(j => s.joinTypes.add(j.trim()));
 
-  // Check GROUP BY present and similar
-  if (solParts.groupBy) {
-    total += 2;
-    if (userParts.groupBy) {
-      // Check if grouping columns overlap
-      const solCols  = solParts.groupBy.split(',').map(s => s.trim());
-      const userCols = userParts.groupBy.split(',').map(s => s.trim());
-      const matched = solCols.filter(c => userCols.some(uc => uc.includes(c) || c.includes(uc)));
-      score += (matched.length / solCols.length) * 2;
+    // Aggregate functions used
+    s.aggregates = new Set();
+    if (/\bcount\s*\(/.test(q))  s.aggregates.add('count');
+    if (/\bsum\s*\(/.test(q))    s.aggregates.add('sum');
+    if (/\bavg\s*\(/.test(q))    s.aggregates.add('avg');
+    if (/\bmax\s*\(/.test(q))    s.aggregates.add('max');
+    if (/\bmin\s*\(/.test(q))    s.aggregates.add('min');
+
+    // Window functions
+    s.windowFuncs = new Set();
+    ['rank()', 'dense_rank()', 'row_number()', 'ntile', 'lead', 'lag',
+     'first_value', 'last_value', 'percent_rank', 'cume_dist'].forEach(fn => {
+      if (q.includes(fn.replace('()', '('))) s.windowFuncs.add(fn);
+      else if (q.includes(fn)) s.windowFuncs.add(fn);
+    });
+    s.hasPartitionBy = /\bpartition\s+by\b/.test(q);
+    s.hasOver        = /\bover\s*\(/.test(q);
+
+    // Special keywords
+    s.hasExists    = /\bexists\b/.test(q);
+    s.hasNotExists = /\bnot\s+exists\b/.test(q);
+    s.hasNotIn     = /\bnot\s+in\b/.test(q);
+    s.hasIn        = /\bin\s*\(/.test(q) && !s.hasNotIn;
+    s.hasBetween   = /\bbetween\b/.test(q);
+    s.hasLike      = /\b(like|ilike)\b/.test(q);
+    s.hasCase      = /\bcase\b/.test(q);
+    s.hasCoalesce  = /\bcoalesce\b/.test(q);
+    s.hasExtract   = /\bextract\b/.test(q);
+    s.hasDateTrunc = /\bdate_trunc\b/.test(q);
+    s.hasInterval  = /\binterval\b/.test(q);
+    s.hasRecursive = /\brecursive\b/.test(q);
+    s.hasIsNull    = /\bis\s+null\b/.test(q);
+    s.hasIsNotNull = /\bis\s+not\s+null\b/.test(q);
+
+    // WHERE/HAVING condition values (numbers, strings in quotes)
+    s.conditionValues = new Set();
+    const numMatches = q.match(/(?:=|>|<|>=|<=|<>|!=)\s*(\d+)/g) || [];
+    numMatches.forEach(m => s.conditionValues.add(m.replace(/[^0-9]/g, '')));
+    const strMatches = q.match(/'([^']+)'/g) || [];
+    strMatches.forEach(m => s.conditionValues.add(m));
+
+    // GROUP BY columns
+    s.groupCols = new Set();
+    const groupMatch = q.match(/group\s+by\s+(.*?)(?:\s+having|\s+order\s+by|\s+limit|\s*$)/s);
+    if (groupMatch) {
+      groupMatch[1].split(',').forEach(c => {
+        const col = c.trim().replace(/^\d+$/, 'positional');
+        if (col) s.groupCols.add(col);
+      });
     }
+
+    // Subquery count
+    s.subqueryCount = (q.match(/\bselect\b/g) || []).length;
+
+    return s;
   }
 
-  // Check HAVING
-  if (solParts.having) {
-    total += 1.5;
-    if (userParts.having) score += 1.5;
+  const solS  = extractStructure(sol);
+  const userS = extractStructure(user);
+
+  // ---- Scoring with strict requirements ----
+  let checks = 0;
+  let passed = 0;
+
+  // 1. Must use the same tables (REQUIRED — instant fail if wrong)
+  checks += 3;
+  const solTables  = [...solS.tables];
+  const userTables = [...userS.tables];
+  const tableMatch = solTables.filter(t => userTables.includes(t));
+  if (tableMatch.length === solTables.length && userTables.length <= solTables.length + 1) {
+    passed += 3;
+  } else {
+    return false; // Wrong tables = definitely wrong
   }
 
-  // Check WHERE clause exists
-  if (solParts.where) {
-    total += 2;
-    if (userParts.where) {
-      // Simple overlap check
-      const solTokens = solParts.where.split(/\s+/);
-      const matchTokens = solTokens.filter(t => userParts.where.includes(t));
-      score += (matchTokens.length / solTokens.length) * 2;
+  // 2. Must have the same key clauses
+  const clauseChecks = [
+    ['hasWhere',    solS.hasWhere],
+    ['hasGroupBy',  solS.hasGroupBy],
+    ['hasHaving',   solS.hasHaving],
+    ['hasDistinct', solS.hasDistinct],
+    ['hasCTE',      solS.hasCTE],
+    ['hasUnion',    solS.hasUnion],
+    ['hasCase',     solS.hasCase],
+    ['hasCoalesce', solS.hasCoalesce],
+    ['hasRecursive', solS.hasRecursive],
+  ];
+  clauseChecks.forEach(([key, solHas]) => {
+    if (solHas) {
+      checks += 2;
+      if (userS[key]) passed += 2;
     }
+  });
+
+  // 3. Must use the same aggregate functions
+  if (solS.aggregates.size > 0) {
+    checks += 2;
+    const aggMatch = [...solS.aggregates].filter(a => userS.aggregates.has(a));
+    if (aggMatch.length === solS.aggregates.size) passed += 2;
+    else passed += (aggMatch.length / solS.aggregates.size);
   }
 
-  // Check important keywords/functions
-  if (solParts.keywords.length > 0) {
-    total += 3;
-    const matchedKw = solParts.keywords.filter(kw => user.includes(kw));
-    score += (matchedKw.length / solParts.keywords.length) * 3;
+  // 4. Must use the same window functions
+  if (solS.windowFuncs.size > 0) {
+    checks += 2;
+    const wfMatch = [...solS.windowFuncs].filter(f => userS.windowFuncs.has(f));
+    if (wfMatch.length === solS.windowFuncs.size) passed += 2;
+    else return false; // Wrong window function = wrong approach
   }
 
-  // Check SELECT columns roughly match
-  if (solParts.select) {
-    total += 2;
-    if (userParts.select) {
-      const solAliases = (sol.match(/\bas\s+\w+/g) || []).map(a => a.replace('as ', ''));
-      const userAliases = (user.match(/\bas\s+\w+/g) || []).map(a => a.replace('as ', ''));
-      const matchAliases = solAliases.filter(a => userAliases.includes(a));
-      if (solAliases.length > 0) {
-        score += (matchAliases.length / solAliases.length) * 2;
-      } else {
-        score += 1; // partial credit if no aliases to compare
-      }
+  // 5. PARTITION BY must match if solution uses it
+  if (solS.hasPartitionBy) {
+    checks += 2;
+    if (userS.hasPartitionBy) passed += 2;
+    else return false;
+  }
+
+  // 6. Join types must match
+  if (solS.joinTypes.size > 0) {
+    checks += 2;
+    const jtMatch = [...solS.joinTypes].filter(j => {
+      // Allow "join" to match "inner join" and vice versa
+      return userS.joinTypes.has(j) ||
+        (j === 'join' && userS.joinTypes.has('inner join')) ||
+        (j === 'inner join' && userS.joinTypes.has('join'));
+    });
+    if (jtMatch.length >= solS.joinTypes.size) passed += 2;
+    else if (jtMatch.length > 0) passed += 1;
+  }
+
+  // 7. Special operators must match
+  const opChecks = ['hasExists', 'hasNotExists', 'hasNotIn', 'hasBetween', 'hasLike',
+                    'hasExtract', 'hasDateTrunc', 'hasInterval', 'hasIsNull'];
+  opChecks.forEach(key => {
+    if (solS[key]) {
+      checks += 1.5;
+      if (userS[key]) passed += 1.5;
     }
+  });
+
+  // 8. Condition values must overlap (catches wrong filter values)
+  if (solS.conditionValues.size > 0) {
+    checks += 2;
+    const valMatch = [...solS.conditionValues].filter(v => userS.conditionValues.has(v));
+    passed += (valMatch.length / solS.conditionValues.size) * 2;
   }
 
-  // Must hit at least 80% to pass
-  return total > 0 && (score / total) >= 0.80;
+  // 9. Output aliases should match
+  if (solS.aliases.size > 0) {
+    checks += 1.5;
+    const aliasMatch = [...solS.aliases].filter(a => userS.aliases.has(a));
+    passed += (aliasMatch.length / solS.aliases.size) * 1.5;
+  }
+
+  // 10. GROUP BY columns should match
+  if (solS.groupCols.size > 0) {
+    checks += 1.5;
+    const gcMatch = [...solS.groupCols].filter(c =>
+      [...userS.groupCols].some(uc => uc.includes(c) || c.includes(uc))
+    );
+    passed += (gcMatch.length / solS.groupCols.size) * 1.5;
+  }
+
+  // Must hit at least 90% to pass
+  return checks > 0 && (passed / checks) >= 0.90;
 }
 
 // ---- Analyze SQL for syntax feedback ----
@@ -335,19 +425,27 @@ function analyzeSQL(code) {
   return { issues, info };
 }
 
-// ---- Generate simulated result table from a query ----
-function generateFakeResults(code) {
-  const lower = code.toLowerCase().replace(/\s+/g, ' ').trim();
+// ---- Generate expected output based on the SOLUTION (not user query) ----
+// Uses a seeded approach so results are consistent per problem
+function generateExpectedOutput(prob) {
+  const sol = prob.solution.toLowerCase().replace(/\s+/g, ' ').trim();
 
-  // Extract column names/aliases from the SELECT clause
-  const selMatch = lower.match(/select\s+(.*?)\s+from/s);
+  // Parse columns from the outermost SELECT in the solution
+  // Handle CTEs by finding the last SELECT
+  let selectSource = sol;
+  // If there's a CTE, grab the final SELECT
+  if (sol.startsWith('with')) {
+    const lastSelect = sol.lastIndexOf('select');
+    if (lastSelect > 0) selectSource = sol.substring(lastSelect);
+  }
+
+  const selMatch = selectSource.match(/select\s+(.*?)\s+from/s);
   if (!selMatch) return null;
 
   let selectPart = selMatch[1].trim();
-  // Remove DISTINCT / DISTINCT ON
   selectPart = selectPart.replace(/^distinct\s+(on\s*\(.*?\)\s*)?/i, '');
 
-  // Parse columns — handle nested parens (aggregates, window funcs)
+  // Parse columns handling nested parens
   const columns = [];
   let depth = 0, current = '';
   for (const ch of selectPart) {
@@ -362,82 +460,109 @@ function generateFakeResults(code) {
   }
   if (current.trim()) columns.push(current.trim());
 
-  // Extract display names (use alias if present, otherwise derive)
+  // Extract display names
   const colNames = columns.map(col => {
     const aliasMatch = col.match(/\bas\s+["']?(\w+)["']?\s*$/i);
     if (aliasMatch) return aliasMatch[1];
-    // If it's just a column reference like t.name, take the last part
     const dotMatch = col.match(/\.(\w+)\s*$/);
     if (dotMatch) return dotMatch[1];
-    // If it's a simple column name
     const simpleMatch = col.match(/^(\w+)$/);
     if (simpleMatch) return simpleMatch[1];
-    // For expressions like COUNT(*), derive a name
     const funcMatch = col.match(/^(\w+)\s*\(/);
-    if (funcMatch) return funcMatch[1].toLowerCase();
+    if (funcMatch) return funcMatch[1];
+    // String literal like 'Active'
+    const litMatch = col.match(/^'([^']+)'/);
+    if (litMatch) return 'status';
     return 'column';
   });
 
-  // Generate fake data based on column names
-  const sampleNames = ['Alice Johnson', 'Marcus Lee', 'Sara Kim', 'James Park', 'Olivia Chen', 'Ryan Kumar', 'Diana Ross', 'Tom Bradley'];
-  const sampleEmails = ['alice@gmail.com', 'marcus@yahoo.com', 'sara@outlook.com', 'james@gmail.com'];
-  const sampleDepts = ['Engineering', 'Marketing', 'Sales', 'Product', 'Finance'];
-  const sampleCities = ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix'];
-  const sampleProducts = ['Widget A', 'Gadget B', 'Tool C', 'Device D', 'Module E'];
-  const sampleStatuses = ['active', 'inactive', 'pending'];
-  const sampleMonths = ['2024-01-01', '2024-02-01', '2024-03-01', '2024-04-01', '2024-05-01'];
+  // Seeded random based on problem id (consistent per problem)
+  let seed = prob.id * 9973;
+  function seededRandom() {
+    seed = (seed * 16807 + 0) % 2147483647;
+    return (seed - 1) / 2147483646;
+  }
+
+  // Sample data pools
+  const names    = ['Alice Johnson', 'Marcus Lee', 'Sara Kim', 'James Park', 'Olivia Chen', 'Ryan Kumar', 'Diana Ross', 'Tom Bradley', 'Priya Patel', 'David Chang'];
+  const emails   = ['alice@gmail.com', 'marcus@yahoo.com', 'sara@outlook.com', 'james@company.com', 'olivia@gmail.com'];
+  const depts    = ['Engineering', 'Marketing', 'Sales', 'Product', 'Finance'];
+  const cities   = ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix'];
+  const products = ['Widget Pro', 'DataSync', 'CloudKit', 'NetGuard', 'AppForge'];
+  const statuses = ['active', 'inactive', 'pending', 'shipped', 'delivered'];
+  const months   = ['2024-01-01', '2024-02-01', '2024-03-01', '2024-04-01', '2024-05-01'];
+  const dates    = ['2024-01-15', '2024-02-20', '2024-03-08', '2024-04-12', '2024-05-03'];
+  const titles   = ['Software Engineer', 'Product Manager', 'Data Analyst', 'Designer', 'DevOps Engineer'];
+  const domains  = ['gmail.com', 'yahoo.com', 'outlook.com', 'company.io', 'startup.co'];
+  const brackets = ['High', 'Medium', 'Low'];
+
+  function pick(arr, i) { return arr[i % arr.length]; }
 
   function fakeValue(name, rowIdx) {
     const n = name.toLowerCase();
-    if (n.includes('id') && !n.includes('email'))
-      return rowIdx + 1 + Math.floor(Math.random() * 10) * (rowIdx + 1);
-    if (n === 'name' || n === 'employee' || n === 'full_name' || n === 'customer_name' || n === 'employee_name' || n === 'username' || n === 'display_name')
-      return sampleNames[rowIdx % sampleNames.length];
-    if (n.includes('email'))
-      return sampleEmails[rowIdx % sampleEmails.length];
+    const r = seededRandom;
+
+    if (n === 'email' || n.includes('email'))
+      return pick(emails, rowIdx);
+    if (n === 'name' || n === 'employee' || n === 'full_name' || n === 'customer_name' || n === 'employee_name' || n === 'username' || n === 'display_name' || n === 'upper_name' || n === 'clean_name')
+      return pick(names, rowIdx);
     if (n.includes('dept') || n === 'department')
-      return sampleDepts[rowIdx % sampleDepts.length];
+      return pick(depts, rowIdx);
     if (n.includes('city') || n.includes('country') || n.includes('region'))
-      return sampleCities[rowIdx % sampleCities.length];
+      return pick(cities, rowIdx);
     if (n.includes('product') && !n.includes('id'))
-      return sampleProducts[rowIdx % sampleProducts.length];
-    if (n.includes('status'))
-      return sampleStatuses[rowIdx % sampleStatuses.length];
-    if (n.includes('month') || n.includes('date') || n.includes('day'))
-      return sampleMonths[rowIdx % sampleMonths.length];
-    if (n.includes('salary') || n.includes('compensation'))
-      return (80000 + Math.floor(Math.random() * 70000));
-    if (n.includes('revenue') || n.includes('total') || n.includes('amount') || n.includes('price') || n.includes('fare') || n.includes('spent'))
-      return parseFloat((100 + Math.random() * 9900).toFixed(2));
-    if (n.includes('avg') || n.includes('median') || n.includes('percent') || n.includes('rate') || n.includes('ratio'))
-      return parseFloat((Math.random() * 100).toFixed(2));
-    if (n.includes('count') || n.includes('num') || n.includes('streak') || n === 'mau' || n === 'viewers' || n === 'purchasers' || n === 'retained')
-      return Math.floor(10 + Math.random() * 990);
-    if (n.includes('rank') || n === 'rnk' || n === 'rn' || n === 'row_num' || n === 'ntile')
-      return rowIdx + 1;
-    if (n.includes('sum') || n.includes('running'))
-      return parseFloat((1000 + Math.random() * 50000).toFixed(2));
-    if (n.includes('bracket') || n.includes('tier') || n.includes('label') || n.includes('type') || n.includes('category'))
-      return ['High', 'Medium', 'Low'][rowIdx % 3];
-    if (n.includes('length'))
-      return Math.floor(5 + Math.random() * 20);
+      return pick(products, rowIdx);
+    if (n === 'status' || n.includes('churn_type') || n.includes('bracket') || n.includes('tier') || n.includes('type') || n.includes('category') || n === 'salary_bracket' || n === 'contact_method')
+      return pick(brackets, rowIdx);
+    if (n.includes('title') || n === 'job_title')
+      return pick(titles, rowIdx);
     if (n.includes('domain'))
-      return ['gmail.com', 'yahoo.com', 'outlook.com', 'company.com'][rowIdx % 4];
-    if (n.includes('contact'))
-      return ['555-0101', 'alice@email.com', 'No contact info', '555-0202'][rowIdx % 4];
-    // Default: a number
-    return Math.floor(1 + Math.random() * 100);
+      return pick(domains, rowIdx);
+    if (n.includes('month') || n === 'activity_month' || n === 'churn_month' || n === 'birth_month')
+      return rowIdx < 5 ? pick(months, rowIdx) : pick(months, rowIdx);
+    if (n.includes('date') || n.includes('day') || n === 'signup_date' || n === 'order_date')
+      return pick(dates, rowIdx);
+    if (n.includes('salary') || n.includes('compensation') || n === 'max_salary' || n === 'min_salary')
+      return [145000, 128000, 115000, 98000, 85000, 72000][rowIdx % 6];
+    if (n.includes('revenue') || n.includes('total') || n.includes('amount') || n.includes('price') || n.includes('fare') || n.includes('spent') || n === 'product_total' || n === 'daily_revenue' || n === 'total_revenue')
+      return [8750.00, 6420.50, 5100.00, 3890.25, 2100.75][rowIdx % 5];
+    if (n.includes('running') || n === 'running_total' || n === 'cumulative')
+      return [8750.00, 15170.50, 20270.50, 24160.75, 26261.50][rowIdx % 5];
+    if (n.includes('avg') || n === 'avg_order_value' || n === 'median' || n === 'median_amount')
+      return [87.50, 64.20, 51.00, 38.90, 21.75][rowIdx % 5];
+    if (n.includes('percent') || n.includes('rate') || n.includes('ratio') || n === 'sales_percentage' || n === 'retention_rate')
+      return [72.50, 65.30, 52.10, 38.40, 21.80][rowIdx % 5];
+    if (n.includes('count') || n.includes('num') || n === 'mau' || n === 'viewers' || n === 'purchasers' || n === 'retained' || n === 'total_users' || n === 'retained_users' || n === 'user_count' || n === 'employee_count' || n === 'department_count' || n === 'email_length')
+      return [482, 341, 275, 198, 124][rowIdx % 5];
+    if (n.includes('streak') || n === 'longest_streak')
+      return [15, 12, 10, 8, 6][rowIdx % 5];
+    if (n === 'pending_count' || n === 'shipped_count' || n === 'delivered_count')
+      return [127, 245, 318][['pending_count', 'shipped_count', 'delivered_count'].indexOf(n)];
+    if (n.includes('rank') || n === 'rnk' || n === 'rn' || n === 'row_num' || n === 'salary_rank')
+      return rowIdx + 1;
+    if (n.includes('id') && !n.includes('email'))
+      return [101, 204, 87, 312, 55, 178, 243, 91][rowIdx % 8];
+
+    // Default number
+    return Math.floor(10 + seededRandom() * 90);
   }
 
-  // Determine row count — use LIMIT if present, otherwise 5
+  // Determine row count from solution
   let rowCount = 5;
-  const limitMatch = lower.match(/limit\s+(\d+)/);
-  if (limitMatch) rowCount = Math.min(parseInt(limitMatch[1], 10), 10);
+  const limitMatch = sol.match(/limit\s+(\d+)/);
+  if (limitMatch) rowCount = Math.min(parseInt(limitMatch[1], 10), 8);
 
-  // Check for single-row aggregates (no GROUP BY, has aggregate func)
-  const hasGroupBy = lower.includes('group by');
-  const hasAgg = /\b(count|sum|avg|max|min)\s*\(/.test(lower);
+  // Single-row aggregate (no GROUP BY)
+  const hasGroupBy = /\bgroup\s+by\b/.test(sol);
+  const hasAgg = /\b(count|sum|avg|max|min)\s*\(/.test(sol);
   if (hasAgg && !hasGroupBy) rowCount = 1;
+
+  // If it's a pivot (multiple CASE WHENs in SELECT), likely 1 row
+  const caseCount = (sol.match(/\bcase\b/g) || []).length;
+  if (caseCount >= 2 && !hasGroupBy) rowCount = 1;
+
+  // 3 rows for grouped results without LIMIT
+  if (hasGroupBy && !limitMatch) rowCount = 5;
 
   const rows = [];
   for (let i = 0; i < rowCount; i++) {
@@ -455,7 +580,18 @@ function renderResultTable(columns, rows) {
   return `<table class="output-result-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
 }
 
-// ---- Run (shows simulated output, no grading) ----
+function renderResultTable(columns, rows) {
+  const ths = columns.map(c => `<th>${c}</th>`).join('');
+  const trs = rows.map(r =>
+    `<tr>${r.map(cell => `<td>${cell !== null && cell !== undefined ? cell : '<span style="color:#888">NULL</span>'}</td>`).join('')}</tr>`
+  ).join('');
+  return `<table class="output-result-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+}
+
+// ---- Precompute expected output for this problem ----
+const expectedOutput = generateExpectedOutput(problem);
+
+// ---- Run (shows expected output table so user knows what to aim for) ----
 function runQuery() {
   const code = getCode().trim();
   if (!code) {
@@ -470,7 +606,6 @@ function runQuery() {
 
   setTimeout(() => {
     const { issues, info } = analyzeSQL(code);
-    const results = generateFakeResults(code);
 
     const issueHtml = issues.length
       ? `<div class="run-issues">
@@ -479,20 +614,20 @@ function runQuery() {
          </div>`
       : '';
 
-    const resultHtml = results
-      ? `<div style="margin-bottom: 12px;">
-           <div class="run-section-label" style="color: var(--green);">Output — ${results.rows.length} row${results.rows.length !== 1 ? 's' : ''}</div>
-           ${renderResultTable(results.columns, results.rows)}
-         </div>`
-      : `<div class="run-issues">
-           <div class="run-section-label" style="color: var(--red);">Could not parse query</div>
-           <div class="run-issue-item">Make sure your query has a valid SELECT ... FROM structure.</div>
-         </div>`;
-
     const infoHtml = info.length
       ? `<div class="run-info">
            <div class="run-section-label" style="color: var(--accent-2);">Query Analysis</div>
            ${info.map(i => `<div class="run-info-item">${i}</div>`).join('')}
+         </div>`
+      : '';
+
+    const resultHtml = expectedOutput
+      ? `<div style="margin-bottom: 12px;">
+           <div class="run-section-label" style="color: var(--green);">Expected Output — ${expectedOutput.rows.length} row${expectedOutput.rows.length !== 1 ? 's' : ''}, ${expectedOutput.columns.length} column${expectedOutput.columns.length !== 1 ? 's' : ''}</div>
+           ${renderResultTable(expectedOutput.columns, expectedOutput.rows)}
+           <div style="color: var(--text-muted); font-size: 0.78rem; margin-top: 6px; font-style: italic;">
+             Sample data — your query should produce these columns in this format.
+           </div>
          </div>`
       : '';
 
@@ -502,7 +637,7 @@ function runQuery() {
         ${issueHtml}
         ${infoHtml}
         <div style="color: var(--text-muted); font-family: var(--font); font-size: 0.82rem; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
-          <em>Simulated output with sample data.</em> Click <strong>Submit</strong> to check your answer.
+          Click <strong>Submit</strong> when you're ready to check your answer.
         </div>
       </div>
     `;
