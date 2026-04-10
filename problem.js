@@ -990,6 +990,16 @@ document.getElementById('copyBtn').addEventListener('click', () => {
   });
 });
 
+// ---- Prev/Next navigation ----
+const prevId = problem.id > 1 ? problem.id - 1 : PROBLEMS.length;
+const nextId = problem.id < PROBLEMS.length ? problem.id + 1 : 1;
+document.getElementById('prevBtn').addEventListener('click', () => {
+  window.location.href = `problem.html?id=${prevId}`;
+});
+document.getElementById('nextBtn').addEventListener('click', () => {
+  window.location.href = `problem.html?id=${nextId}`;
+});
+
 document.getElementById('hintBtn').addEventListener('click', () => {
   const box = document.getElementById('hintBox');
   box.style.display = box.style.display === 'none' ? 'block' : 'none';
